@@ -1,0 +1,47 @@
+name: Issue 578 validation
+on:
+  push:
+    branches: [validation/578-a91d]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Required checks and baseline comparison
+        run: |
+          mkdir -p /tmp/issue-578-results
+          cp components/dashboard/RecentTransactions.tsx /tmp/documented.tsx
+          set +e
+          for revision in changed baseline; do
+            if [ "$revision" = baseline ]; then
+              git show 0cca705b2912a329ffb3ad142d6be13de45183bc:components/dashboard/RecentTransactions.tsx > components/dashboard/RecentTransactions.tsx
+            fi
+            npm run lint > "/tmp/issue-578-results/$revision-lint.log" 2>&1
+            echo "$revision lint exit=$?" | tee -a /tmp/issue-578-results/summary.log
+            npm run type-check > "/tmp/issue-578-results/$revision-types.log" 2>&1
+            echo "$revision type-check exit=$?" | tee -a /tmp/issue-578-results/summary.log
+          done
+          cp /tmp/documented.tsx components/dashboard/RecentTransactions.tsx
+          for check in lint types; do
+            for revision in changed baseline; do
+              sed -E 's/[0-9]+:[0-9]+/LINE:COL/g; s/\([0-9]+,[0-9]+\)/(LINE,COL)/g' "/tmp/issue-578-results/$revision-$check.log" > "/tmp/issue-578-results/$revision-$check.normalized"
+            done
+            diff -u "/tmp/issue-578-results/baseline-$check.normalized" "/tmp/issue-578-results/changed-$check.normalized" > "/tmp/issue-578-results/$check-diff.log"
+            echo "$check normalized diff exit=$?" | tee -a /tmp/issue-578-results/summary.log
+          done
+          cat /tmp/issue-578-results/summary.log
+          if grep -q 'exit=[1-9]' /tmp/issue-578-results/summary.log; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue-578-results
+          path: /tmp/issue-578-results/
